@@ -3,6 +3,7 @@ pragma solidity >=0.8.0 <0.9.0;
 
 import "hardhat/console.sol";
 import "@1hive/celeste-helpers/contracts/Disputable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract GitcoinAppeals is Disputable {
 
@@ -12,6 +13,8 @@ contract GitcoinAppeals is Disputable {
     mapping(address => bool) public approvedAppealers;
     mapping(uint256 => Status) public disputeStatus;
 
+    event GitcoinAccountUpdated(address newGitcoinAccount);
+    event ReclaimedFunds(IERC20 token, uint256 amount);
     event AppealAllowed(address appealer);
     event AppealCreated(address appealer, uint256 disputeId, bytes originalProposal, bytes evidence);
     event AppealEvidenceFinalised(address gitcoinAccount, uint256 disputeId, bytes evidence);
@@ -22,16 +25,26 @@ contract GitcoinAppeals is Disputable {
         _;
     }
 
-    constructor(address _arbitrator, address _arbitratorManifest)Disputable(_arbitrator, _arbitratorManifest){}
+    constructor(address _arbitrator, address _arbitratorManifest) Disputable(_arbitrator, _arbitratorManifest){}
 
-    function allowAppeal(address _appealer) public isGitcoinAccount {
-        approvedAppealers[_appealer] = true;
+    function updateGitcoinAccount(address _gitcoinAccount) public isGitcoinAccount {
+        gitcoinAccount = _gitcoinAccount;
+        emit GitcoinAccountUpdated(_gitcoinAccount);
+    }
 
+    function reclaimFunds(IERC20 _token) public isGitcoinAccount {
+        uint256 tokenBalance = _token.balanceOf(msg.sender);
+        _token.transfer(msg.sender, tokenBalance);
+        emit ReclaimedFunds(_token, tokenBalance);
+    }
+
+    function allowAppeal(address _appealer, bool _allow) public isGitcoinAccount {
+        approvedAppealers[_appealer] = _allow;
         emit AppealAllowed(_appealer);
     }
 
     function createAppeal(bytes memory _originalProposal, bytes memory _evidence) public {
-        require(approvedAppealers[msg.sender], "ERR:NOT_APPROVED");
+        require(approvedAppealers[msg.sender], "ERR:NOT_APPROVED_TO_APPEAL");
         approvedAppealers[msg.sender] = false;
 
         // This will take the necessary fees in Honey from this contract, if it doesn't have them it will revert
@@ -42,7 +55,11 @@ contract GitcoinAppeals is Disputable {
         emit AppealCreated(msg.sender, disputeId, _originalProposal, _evidence);
     }
 
-    function submitGitcoinEvidence(uint256 _disputeId, bytes memory _evidence) public isGitcoinAccount {
+    function submitGitcoinEvidence(uint256 _disputeId, bytes memory _evidence) public {
+        (bool canSubmitEvidence, address submittingFor) = arbitratorManifest.canSubmitEvidenceFor(msg.sender, _disputeId);
+        require(canSubmitEvidence, "ERR:NOT_APPROVED_FOR_EVIDENCE");
+        require(submittingFor == gitcoinAccount, "ERR:NOT_GITCOIN_REP");
+
         arbitrator.submitEvidence(_disputeId, msg.sender, _evidence);
 
         // This will revert if the evidence period has already been closed, eg if this function has already been called

@@ -67,3 +67,5 @@ yarn-error.log*
 
 # doc directory
 /doc
+
+**/package-lock.json
